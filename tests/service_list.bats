@@ -22,7 +22,7 @@ teardown() {
 
 @test "($PLUGIN_COMMAND_PREFIX:list) with linked app" {
   dokku apps:create my_app
-  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app l
   run dokku "$PLUGIN_COMMAND_PREFIX:list"
   assert_contains "${lines[*]}" "l     mongo:3.2.9  running  -              my_app"
   dokku --force apps:destroy my_app

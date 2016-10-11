@@ -21,30 +21,26 @@ teardown() {
 
 @test "($PLUGIN_COMMAND_PREFIX:info) success" {
   run dokku "$PLUGIN_COMMAND_PREFIX:info" l
-  local password="$(cat "$PLUGIN_DATA_ROOT/l/PASSWORD")"
-  assert_contains "${lines[*]}" "mongodb://l:$password@dokku-mongo-l:27017/l"
+  local password="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/PASSWORD")"
+  local user="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/USER")"
+  assert_contains "${lines[*]}" "mongodb://$user:$password@dokku-mongo-l:27017/l"
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:info) replaces underscores by dash in hostname" {
   dokku "$PLUGIN_COMMAND_PREFIX:create" test_with_underscores
   run dokku "$PLUGIN_COMMAND_PREFIX:info" test_with_underscores
-  local password="$(cat "$PLUGIN_DATA_ROOT/test_with_underscores/PASSWORD")"
-  assert_contains "${lines[*]}" "mongodb://test_with_underscores:$password@dokku-mongo-test-with-underscores:27017/test_with_underscores"
+  local password="$(cat "$PLUGIN_DATA_ROOT/test_with_underscores/dbs/test_with_underscores/PASSWORD")"
+  local user="$(cat "$PLUGIN_DATA_ROOT/test_with_underscores/dbs/test_with_underscores/USER")"
+  assert_contains "${lines[*]}" "mongodb://$user:$password@dokku-mongo-test-with-underscores:27017/test_with_underscores"
   dokku --force "$PLUGIN_COMMAND_PREFIX:destroy" test_with_underscores
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:info) success with flag" {
-  run dokku "$PLUGIN_COMMAND_PREFIX:info" l --dsn
-  local password="$(cat "$PLUGIN_DATA_ROOT/l/PASSWORD")"
-  assert_output "mongodb://l:$password@dokku-mongo-l:27017/l"
 
   run dokku "$PLUGIN_COMMAND_PREFIX:info" l --config-dir
   assert_success
 
   run dokku "$PLUGIN_COMMAND_PREFIX:info" l --data-dir
-  assert_success
-
-  run dokku "$PLUGIN_COMMAND_PREFIX:info" l --dsn
   assert_success
 
   run dokku "$PLUGIN_COMMAND_PREFIX:info" l --exposed-ports

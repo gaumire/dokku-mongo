@@ -23,6 +23,7 @@ service_create() {
   mkdir -p "$SERVICE_ROOT/data" || dokku_log_fail "Unable to create service data directory"
   mkdir -p "$SERVICE_ROOT/config" || dokku_log_fail "Unable to create service config directory"
   touch "$LINKS_FILE"
+
   rootpassword=$(openssl rand -hex 16)
   password=$(openssl rand -hex 16)
   echo "$rootpassword" > "$SERVICE_ROOT/ROOTPASSWORD"
@@ -39,10 +40,25 @@ service_create() {
 
 service_create_container() {
   local SERVICE="$1"
+  local DATABASE=$SERVICE
   local SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"
   local SERVICE_NAME="$(get_service_name "$SERVICE")"
   local ROOTPASSWORD="$(cat "$SERVICE_ROOT/ROOTPASSWORD")"
   local PASSWORD="$(cat "$SERVICE_ROOT/PASSWORD")"
+  local DB_LINKS_FILE="$SERVICE_ROOT/dbs/$DATABASE/LINKS"
+
+  mkdir -p "$SERVICE_ROOT/dbs" || dokku_log_fail "Unable to create directory to store database data"
+  mkdir -p "$SERVICE_ROOT/dbs/$DATABASE" || dokku_log_fail "Unable to create directory to store db specific data"
+
+  touch "$DB_LINKS_FILE"
+  db_user=$(openssl rand -hex 8)
+  password=$(openssl rand -hex 8)
+  echo "$db_user" > "$SERVICE_ROOT/dbs/$DATABASE/USER"
+  echo "$password" > "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD"
+  chmod 640 "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD"
+
+  local PASSWORD="$(cat "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD")"
+  local MONGO_USER="$(cat "$SERVICE_ROOT/dbs/$DATABASE/USER")"
 
   # shellcheck disable=SC2086
   ID=$(docker run --name "$SERVICE_NAME" -v "$SERVICE_ROOT/data:/data/db" --env-file="$SERVICE_ROOT/ENV" -d --restart always --label dokku=service --label dokku.service=mongo "$PLUGIN_IMAGE:$PLUGIN_IMAGE_VERSION" mongod $MONGO_CONFIG_OPTIONS)
@@ -52,19 +68,80 @@ service_create_container() {
   docker run --rm --link "$SERVICE_NAME:$PLUGIN_COMMAND_PREFIX" dokkupaas/wait:0.2 -p "$PLUGIN_DATASTORE_WAIT_PORT" > /dev/null
 
   echo "db.createUser({user:'admin',pwd:'$ROOTPASSWORD',roles:[{role:'userAdminAnyDatabase',db:'admin'},{role:'__system',db:'admin'},{role:'root',db:'admin'}]})" | docker exec -i "$SERVICE_NAME" mongo admin > /dev/null
-  echo "db.createUser({user:'$SERVICE',pwd:'$PASSWORD',roles:[{role:'readWrite',db:'$SERVICE'}]})" | docker exec -i "$SERVICE_NAME" mongo -u admin -p "$ROOTPASSWORD" --authenticationDatabase admin "$SERVICE" > /dev/null
+  echo "db.createUser({user:'$MONGO_USER',pwd:'$PASSWORD',roles:[{role:'readWrite',db:'$DATABASE'}]})" | docker exec -i "$SERVICE_NAME" mongo -u admin -p "$ROOTPASSWORD" --authenticationDatabase admin "$DATABASE" > /dev/null
   dokku_log_info2 "$PLUGIN_SERVICE container created: $SERVICE"
+  service_info "$SERVICE"
+}
+
+service_drop_db() {
+  local SERVICE="$1"
+  local DATABASE="$2"
+  local SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"
+  local SERVICE_NAME="$(get_service_name "$SERVICE")"
+  local ROOTPASSWORD="$(cat "$SERVICE_ROOT/ROOTPASSWORD")"  
+  local PASSWORD="$(cat "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD")"
+  local MONGO_USER="$(cat "$SERVICE_ROOT/dbs/$DATABASE/USER")"
+  local DB_LINKS_FILE="$SERVICE_ROOT/dbs/$DATABASE/LINKS"
+  [[ -z "$SERVICE" ]] && dokku_log_fail "Please specify a name for the service"
+  [[ -z "$DATABASE" ]] && dokku_log_fail "Please specify a database name"
+
+  # create database and grant permissions
+  echo "db.removeUser('$MONGO_USER')" | docker exec -i "$SERVICE_NAME" mongo -u admin -p "$ROOTPASSWORD" --authenticationDatabase admin "$DATABASE" > /dev/null
+  echo "db.dropDatabase()" | docker exec -i "$SERVICE_NAME" mongo -u admin -p "$ROOTPASSWORD" --authenticationDatabase admin "$DATABASE" > /dev/null
+
+  rm -rf "$SERVICE_ROOT/dbs/$DATABASE"
+
+  echo "Database $DATABASE on service $SERVICE destroyed!"
+}
+
+service_extend() {
+  local SERVICE="$1"
+  local DATABASE="$2"
+  local SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"
+
+  [[ ! -d "$SERVICE_ROOT/dbs/$DATABASE" ]] || dokku_log_fail "$PLUGIN_SERVICE service $SERVICE already has database $DATABASE configured"
+  mkdir -p "$SERVICE_ROOT/dbs/$DATABASE" || dokku_log_fail "Unable to create directory to store db specific data"
+  [[ -z "$SERVICE" ]] && dokku_log_fail "Please specify a name for the service"
+  [[ -z "$DATABASE" ]] && dokku_log_fail "Please specify a database name"
+  [[ -d "$PLUGIN_DATA_ROOT/$SERVICE" ]] || dokku_log_fail "$PLUGIN_SERVICE service $SERVICE doesn't exist"
+  SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"; LINKS_FILE="$SERVICE_ROOT/LINKS"
+
+  if ! docker images | grep -e "^$PLUGIN_IMAGE " | grep -q " $PLUGIN_IMAGE_VERSION " ; then
+    docker pull "$PLUGIN_IMAGE:$PLUGIN_IMAGE_VERSION" || dokku_log_fail "$PLUGIN_SERVICE image $PLUGIN_IMAGE:$PLUGIN_IMAGE_VERSION pull failed"
+  fi
+  db_user=$(openssl rand -hex 8)
+  password=$(openssl rand -hex 8)
+  echo "$db_user" > "$SERVICE_ROOT/dbs/$DATABASE/USER"
+  echo "$password" > "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD"
+  chmod 640 "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD"
+
+  service_extend_db "$SERVICE" "$DATABASE"
+}
+
+service_extend_db() {
+  local SERVICE="$1"
+  local DATABASE="$2"
+  local SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"
+  local SERVICE_NAME="$(get_service_name "$SERVICE")"
+  local ROOTPASSWORD="$(cat "$SERVICE_ROOT/ROOTPASSWORD")"  
+  local PASSWORD="$(cat "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD")"
+  local MONGO_USER="$(cat "$SERVICE_ROOT/dbs/$DATABASE/USER")"
+
+  # create database and grant permissions
+  echo "db.createUser({user:'$MONGO_USER',pwd:'$PASSWORD',roles:[{role:'readWrite',db:'$DATABASE'}]})" | docker exec -i "$SERVICE_NAME" mongo -u admin -p "$ROOTPASSWORD" --authenticationDatabase admin "$DATABASE" > /dev/null
   service_info "$SERVICE"
 }
 
 service_export() {
   local SERVICE="$1"
+  local DATABASE="$2"
   local SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"
   local SERVICE_NAME="$(get_service_name "$SERVICE")"
-  local PASSWORD="$(cat "$SERVICE_ROOT/PASSWORD")"
+  local PASSWORD="$(cat "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD")"
+  local MONGO_USER="$(cat "$SERVICE_ROOT/dbs/$DATABASE/USER")"
 
   [[ -n $SSH_TTY ]] && stty -opost
-  docker exec "$SERVICE_NAME" bash -c "DIR=\$(mktemp -d) && mongodump -d $SERVICE -o \"\$DIR\" -u \"$SERVICE\" -p \"$PASSWORD\" --authenticationDatabase \"$SERVICE\" 1>&2 && tar cf - -C \"\$DIR\" . && rm -rf \"\$DIR\""
+  docker exec "$SERVICE_NAME" bash -c "DIR=\$(mktemp -d) && mongodump -d $SERVICE -o \"\$DIR\" -u \"$MONGO_USER\" -p \"$PASSWORD\" --authenticationDatabase \"$DATABASE\" 1>&2 && tar cf - -C \"\$DIR\" . && rm -rf \"\$DIR\""
   status=$?
   [[ -n $SSH_TTY ]] && stty opost
   exit $status
@@ -72,14 +149,16 @@ service_export() {
 
 service_import() {
   local SERVICE="$1"
+  local DATABASE="$2"
   SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"
   SERVICE_NAME="$(get_service_name "$SERVICE")"
-  PASSWORD="$(cat "$SERVICE_ROOT/PASSWORD")"
+  local PASSWORD="$(cat "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD")"
+  local MONGO_USER="$(cat "$SERVICE_ROOT/dbs/$DATABASE/USER")"
 
   if [[ -t 0 ]]; then
     dokku_log_fail "No data provided on stdin."
   fi
-  docker exec -i "$SERVICE_NAME" bash -c "DIR=\$(mktemp -d) && tar xf - -C \"\$DIR\" && mongorestore -d $SERVICE -u \"$SERVICE\" -p \"$PASSWORD\" --authenticationDatabase \"$SERVICE\" \$(find \"\$DIR\" -mindepth 1 -maxdepth 1 -type d | head -n1) && rm -rf \"\$DIR\""
+  docker exec -i "$SERVICE_NAME" bash -c "DIR=\$(mktemp -d) && tar xf - -C \"\$DIR\" && mongorestore -d $SERVICE -u \"$MONGO_USER\" -p \"$PASSWORD\" --authenticationDatabase \"$DATABASE\" \$(find \"\$DIR\" -mindepth 1 -maxdepth 1 -type d | head -n1) && rm -rf \"\$DIR\""
 }
 
 service_start() {
@@ -112,10 +191,12 @@ service_start() {
 
 service_url() {
   local SERVICE="$1"
+  local DATABASE="$2"
   local SERVICE_ROOT="$PLUGIN_DATA_ROOT/$SERVICE"
-  local PASSWORD="$(cat "$SERVICE_ROOT/PASSWORD")"
   local SERVICE_ALIAS="$(service_alias "$SERVICE")"
-  echo "$PLUGIN_SCHEME://$SERVICE:$PASSWORD@$SERVICE_ALIAS:${PLUGIN_DATASTORE_PORTS[0]}/$SERVICE"
+  local PASSWORD="$(cat "$SERVICE_ROOT/dbs/$DATABASE/PASSWORD")"
+  local USER="$(cat "$SERVICE_ROOT/dbs/$DATABASE/USER")"
+  echo "$PLUGIN_SCHEME://$USER:$PASSWORD@$SERVICE_ALIAS:${PLUGIN_DATASTORE_PORTS[0]}/$DATABASE"
 }
 
 update_plugin_scheme_for_app() {

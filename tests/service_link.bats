@@ -22,49 +22,51 @@ teardown() {
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:link) error when the app does not exist" {
-  run dokku "$PLUGIN_COMMAND_PREFIX:link" l not_existing_app
+  run dokku "$PLUGIN_COMMAND_PREFIX:link" l not_existing_app l
   assert_contains "${lines[*]}" "App not_existing_app does not exist"
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:link) error when the service does not exist" {
-  run dokku "$PLUGIN_COMMAND_PREFIX:link" not_existing_service my_app
+  run dokku "$PLUGIN_COMMAND_PREFIX:link" not_existing_service my_app not_existing_service
   assert_contains "${lines[*]}" "service not_existing_service does not exist"
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:link) error when the service is already linked to app" {
-  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app
-  run dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app l
+  run dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app l
   assert_contains "${lines[*]}" "Already linked as MONGO_URL"
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:link) exports MONGO_URL to app" {
-  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app l
   url=$(dokku config:get my_app MONGO_URL)
-  password="$(cat "$PLUGIN_DATA_ROOT/l/PASSWORD")"
-  assert_contains "$url" "mongodb://l:$password@dokku-mongo-l:27017/l"
-  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app
+  local password="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/PASSWORD")"
+  local user="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/USER")"
+  assert_contains "$url" "mongodb://$user:$password@dokku-mongo-l:27017/l"
+  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app l
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:link) generates an alternate config url when MONGO_URL already in use" {
   dokku config:set my_app MONGO_URL=mongodb://user:pass@host:27017/db
-  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app l
   run dokku config my_app
   assert_contains "${lines[*]}" "DOKKU_MONGO_"
-  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app l
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:link) links to app with docker-options" {
-  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app l
   run dokku docker-options my_app
   assert_contains "${lines[*]}" "--link dokku.mongo.l:dokku-mongo-l"
-  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app l
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:link) uses apps MONGO_DATABASE_SCHEME variable" {
   dokku config:set my_app MONGO_DATABASE_SCHEME=mongodb2
-  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app
+  dokku "$PLUGIN_COMMAND_PREFIX:link" l my_app l
   url=$(dokku config:get my_app MONGO_URL)
-  password="$(cat "$PLUGIN_DATA_ROOT/l/PASSWORD")"
-  assert_contains "$url" "mongodb2://l:$password@dokku-mongo-l:27017/l"
-  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app
+  local password="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/PASSWORD")"
+  local user="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/USER")"
+  assert_contains "$url" "mongodb2://$user:$password@dokku-mongo-l:27017/l"
+  dokku "$PLUGIN_COMMAND_PREFIX:unlink" l my_app l
 }

@@ -18,23 +18,30 @@ teardown() {
 
 @test "($PLUGIN_COMMAND_PREFIX:export) error when service does not exist" {
   run dokku "$PLUGIN_COMMAND_PREFIX:export" not_existing_service
+  assert_contains "${lines[*]}" "Please specify a database name"
+}
+
+@test "($PLUGIN_COMMAND_PREFIX:export) error when service does not exist" {
+  run dokku "$PLUGIN_COMMAND_PREFIX:export" not_existing_service not_existing_database_name
   assert_contains "${lines[*]}" "service not_existing_service does not exist"
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:export) success with SSH_TTY" {
   export ECHO_DOCKER_COMMAND="true"
   export SSH_TTY=`tty`
-  run dokku "$PLUGIN_COMMAND_PREFIX:export" l
-  password="$(cat "$PLUGIN_DATA_ROOT/l/PASSWORD")"
+  run dokku "$PLUGIN_COMMAND_PREFIX:export" l l
+  password="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/PASSWORD")"
+  user="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/USER")"
   assert_exit_status 0
-  assert_output "docker exec dokku.mongo.l bash -c DIR=\$(mktemp -d) && mongodump -d l -o \"\$DIR\" -u \"l\" -p \"$password\" --authenticationDatabase \"l\" 1>&2 && tar cf - -C \"\$DIR\" . && rm -rf \"\$DIR\""
+  assert_output "docker exec dokku.mongo.l bash -c DIR=\$(mktemp -d) && mongodump -d l -o \"\$DIR\" -u \"$user\" -p \"$password\" --authenticationDatabase \"l\" 1>&2 && tar cf - -C \"\$DIR\" . && rm -rf \"\$DIR\""
 }
 
 @test "($PLUGIN_COMMAND_PREFIX:export) success without SSH_TTY" {
   export ECHO_DOCKER_COMMAND="true"
   unset SSH_TTY
-  run dokku "$PLUGIN_COMMAND_PREFIX:export" l
-  password="$(cat "$PLUGIN_DATA_ROOT/l/PASSWORD")"
+  run dokku "$PLUGIN_COMMAND_PREFIX:export" l l
+  password="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/PASSWORD")"
+  user="$(cat "$PLUGIN_DATA_ROOT/l/dbs/l/USER")"
   assert_exit_status 0
-  assert_output "docker exec dokku.mongo.l bash -c DIR=\$(mktemp -d) && mongodump -d l -o \"\$DIR\" -u \"l\" -p \"$password\" --authenticationDatabase \"l\" 1>&2 && tar cf - -C \"\$DIR\" . && rm -rf \"\$DIR\""
+  assert_output "docker exec dokku.mongo.l bash -c DIR=\$(mktemp -d) && mongodump -d l -o \"\$DIR\" -u \"$user\" -p \"$password\" --authenticationDatabase \"l\" 1>&2 && tar cf - -C \"\$DIR\" . && rm -rf \"\$DIR\""
 }
